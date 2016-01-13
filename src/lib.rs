@@ -68,12 +68,14 @@ pub struct ECMap<E: Hash + Eq = u32> {
     last_entity: E,
 }
 
-impl<E: Hash + Copy + Eq + Any + Default> ECMap<E> {
-
-    /// Returns a new ECMap with any Entity ID. If you want to use
+impl<E: Hash + Eq + Default> ECMap<E> {
+    /// Returns a new ECMap with a custom entity ID type. If you want to use
     /// ECMap::insert_entity (to generate unique entity IDs),
     /// use ECMap::new_u32, ECMap::new_usize or ECMap::new_u64 instead.
-    pub fn new() -> ECMap<E> { Default::default() }
+    pub fn new_custom() -> ECMap<E> { Default::default() }
+}
+
+impl<E: Hash + Eq + Any + Copy> ECMap<E> {
 
     fn clist<C: Any>(&self) -> Option<&CList<C, E>> {
         self.components.get(&TypeId::of::<C>()).map(|c|
@@ -189,7 +191,7 @@ impl<E: Hash + Eq + Debug> Debug for ECMap<E> {
 
 impl ECMap<u32> {
     /// Returns a new ECMap with u32 as Entity ID.
-    pub fn new_u32() -> ECMap<u32> { Default::default() }
+    pub fn new() -> ECMap<u32> { Default::default() }
 
     /// Generates an Entity ID and inserts it.
     pub fn insert_entity(&mut self) -> u32 {
@@ -245,7 +247,7 @@ fn do_test() {
 #[test]
 fn debug_test() {
 
-    let mut e = ECMap::new_u32();
+    let mut e = ECMap::new();
 
     #[derive(Debug)]
     struct Name(&'static str);
@@ -269,4 +271,16 @@ fn debug_test() {
     let s = format!("{:?}", e);
     println!("{}", s);
     assert!(s == s1 || s == s2 || s == s3 || s == s4);
+}
+
+#[test]
+fn str_as_id() {
+
+    let mut e = ECMap::new_custom();
+
+    #[derive(Debug, Eq, PartialEq, Hash)]
+    struct Sound(&'static str);
+
+    e.insert("Cat", Sound("Meow"));
+    assert_eq!(e.get::<Sound>("Cat"), Some(&Sound("Meow")));
 }
