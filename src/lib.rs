@@ -10,20 +10,38 @@ use std::collections::{HashSet, HashMap};
 use std::collections::hash_map::{Iter as HIter, IterMut as HIterMut}; 
 use std::any::{TypeId, Any};
 use std::hash::Hash;
+use std::fmt;
+use std::fmt::Debug;
 
 trait CompList<EntityId> : Any {
-    fn remove(&mut self, a: &EntityId) -> bool;
+    fn remove(&mut self, &EntityId) -> bool;
     fn as_any_mut(&mut self) -> &mut Any;
     fn as_any(&self) -> &Any;
+    fn debug(&self, &mut fmt::Formatter, &EntityId, &str) -> Option<fmt::Result>;
 }
 
 impl<C: Any, EntityId: Hash + Eq + Any> CompList<EntityId> for CList<C, EntityId> {
     fn remove(&mut self, a: &EntityId) -> bool { self.0.remove(a).is_some() }
     fn as_any_mut(&mut self) -> &mut Any { self }
     fn as_any(&self) -> &Any { self }
+    fn debug(&self, f: &mut fmt::Formatter, a: &EntityId, prefix: &str) -> Option<fmt::Result> {
+        self.1.as_ref().and_then(|b| self.0.get(a).map(|c| {
+            try!(f.write_str(prefix));
+            b(c, f)
+        }))
+    }
 }
 
-struct CList<C: Any, EntityId: Hash + Eq>(HashMap<EntityId, C>);
+struct CList<C: Any, EntityId: Hash + Eq>(HashMap<EntityId, C>, Option<Box<Fn(&C, &mut fmt::Formatter) -> fmt::Result>>);
+
+impl<C: Any, EntityId: Hash + Eq> CList<C, EntityId> {
+    fn new_nodbg() -> CList<C, EntityId> { CList(HashMap::new(), None) }
+}
+
+impl<C: Any + Debug, EntityId: Hash + Eq> CList<C, EntityId> {
+    fn new_dbg() -> CList<C, EntityId> { CList(HashMap::new(), Some(Box::new(
+        |c: &C, f: &mut fmt::Formatter| (c as &Debug).fmt(f)))) }
+}
 
 pub struct Iter<'a, EntityId: 'a, C: 'a>(Option<HIter<'a, EntityId, C>>);
 
@@ -68,15 +86,15 @@ impl<EntityId: Hash + Copy + Eq + Any> ECMap<EntityId> {
     pub fn insert<C: Any>(&mut self, e: EntityId, c: C) -> Option<C> {
         self.entities.insert(e);
         let q = self.components.entry(TypeId::of::<C>())
-            .or_insert_with(|| Box::new(CList(HashMap::<EntityId, C>::new())));
+            .or_insert_with(|| Box::new(CList::<C, EntityId>::new_nodbg()));
         q.as_any_mut().downcast_mut::<CList<C, EntityId>>().unwrap().0.insert(e, c)
     }
 
-    /// Inserts a component type. In case the component type already exists,
-    /// nothing is changed and false is returned.  
-    pub fn insert_component<C: Any>(&mut self) -> bool {
+    /// Inserts a component type and enables debugging for that component.
+    /// In case the component type already exists, nothing is changed and false is returned.  
+    pub fn insert_component<C: Any + Debug>(&mut self) -> bool {
         if self.contains_component::<C>() { return false }
-        self.components.insert(TypeId::of::<C>(), Box::new(CList(HashMap::<EntityId, C>::new())));
+        self.components.insert(TypeId::of::<C>(), Box::new(CList::<C, EntityId>::new_dbg()));
         true
     }
 
@@ -141,6 +159,29 @@ impl<EntityId: Hash + Copy + Eq + Any> ECMap<EntityId> {
     }
 }
 
+impl<EntityId: Hash + Eq + Debug> Debug for ECMap<EntityId> {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        // We cannot use debug_map / debug_set here, unfortunately.
+        try!(f.write_str("ECMap {"));
+        let mut fent = true;
+        for e in self.entities.iter() {
+            if !fent { try!(f.write_str(",\n")) };
+            fent = false;
+            try!(write!(f, "{:?}: (", e));
+            let mut fcomp = true;
+            for c in self.components.values() {
+                match c.debug(f, e, if fcomp {""} else {", "}) {
+                    Some(Err(fe)) => return Err(fe),
+                    Some(_) => fcomp = false,
+                    None => {},
+                }
+            }
+            try!(f.write_str(")"));
+        } 
+        f.write_str("}")
+    }
+}
+
 impl ECMap<u32> {
     /// Returns a new ECMap with u32 as EntityId.
     pub fn new() -> ECMap<u32> { Default::default() }
@@ -194,4 +235,33 @@ fn do_test() {
     assert_eq!(&*e.clone_with::<u16>(), &[(id, 7u16)][..]);
     e.remove_entity(id);
     assert_eq!(&*e.clone_with::<u16>(), &[][..]);
+}
+
+#[test]
+fn debug_test() {
+
+    let mut e = ECMap::new();
+
+    #[derive(Debug)]
+    struct Name(&'static str);
+
+    e.insert_component::<Name>();
+    e.insert_component::<u32>();
+
+    let id1 = e.insert_entity();
+    e.insert(id1, Name("Test"));
+    e.insert(id1, 7u32);
+
+    let id2 = e.insert_entity();
+    e.insert(id2, 5u16);
+
+    // Order is not guaranteed when iterating a hashmap.
+    let s1 = "ECMap {1: (7, Name(\"Test\")),\n2: ()}";
+    let s2 = "ECMap {2: (),\n1: (7, Name(\"Test\"))}";
+    let s3 = "ECMap {1: (Name(\"Test\"), 7),\n2: ()}";
+    let s4 = "ECMap {2: (),\n1: (Name(\"Test\"), 7)}";
+
+    let s = format!("{:?}", e);
+    println!("{}", s);
+    assert!(s == s1 || s == s2 || s == s3 || s == s4);
 }
