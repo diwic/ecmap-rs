@@ -13,18 +13,18 @@ use std::hash::Hash;
 use std::fmt;
 use std::fmt::Debug;
 
-trait CompList<EntityId> : Any {
-    fn remove(&mut self, &EntityId) -> bool;
+trait CompList<E> : Any {
+    fn remove(&mut self, &E) -> bool;
     fn as_any_mut(&mut self) -> &mut Any;
     fn as_any(&self) -> &Any;
-    fn debug(&self, &mut fmt::Formatter, &EntityId, &str) -> Option<fmt::Result>;
+    fn debug(&self, &mut fmt::Formatter, &E, &str) -> Option<fmt::Result>;
 }
 
-impl<C: Any, EntityId: Hash + Eq + Any> CompList<EntityId> for CList<C, EntityId> {
-    fn remove(&mut self, a: &EntityId) -> bool { self.0.remove(a).is_some() }
+impl<C: Any, E: Hash + Eq + Any> CompList<E> for CList<C, E> {
+    fn remove(&mut self, a: &E) -> bool { self.0.remove(a).is_some() }
     fn as_any_mut(&mut self) -> &mut Any { self }
     fn as_any(&self) -> &Any { self }
-    fn debug(&self, f: &mut fmt::Formatter, a: &EntityId, prefix: &str) -> Option<fmt::Result> {
+    fn debug(&self, f: &mut fmt::Formatter, a: &E, prefix: &str) -> Option<fmt::Result> {
         self.1.as_ref().and_then(|b| self.0.get(a).map(|c| {
             try!(f.write_str(prefix));
             b(c, f)
@@ -32,89 +32,94 @@ impl<C: Any, EntityId: Hash + Eq + Any> CompList<EntityId> for CList<C, EntityId
     }
 }
 
-struct CList<C: Any, EntityId: Hash + Eq>(HashMap<EntityId, C>, Option<Box<Fn(&C, &mut fmt::Formatter) -> fmt::Result>>);
+struct CList<C: Any, E: Hash + Eq>(HashMap<E, C>, Option<Box<Fn(&C, &mut fmt::Formatter) -> fmt::Result>>);
 
-impl<C: Any, EntityId: Hash + Eq> CList<C, EntityId> {
-    fn new_nodbg() -> CList<C, EntityId> { CList(HashMap::new(), None) }
+impl<C: Any, E: Hash + Eq> CList<C, E> {
+    fn new_nodbg() -> CList<C, E> { CList(HashMap::new(), None) }
 }
 
-impl<C: Any + Debug, EntityId: Hash + Eq> CList<C, EntityId> {
-    fn new_dbg() -> CList<C, EntityId> { CList(HashMap::new(), Some(Box::new(
+impl<C: Any + Debug, E: Hash + Eq> CList<C, E> {
+    fn new_dbg() -> CList<C, E> { CList(HashMap::new(), Some(Box::new(
         |c: &C, f: &mut fmt::Formatter| (c as &Debug).fmt(f)))) }
 }
 
-pub struct Iter<'a, EntityId: 'a, C: 'a>(Option<HIter<'a, EntityId, C>>);
+pub struct Iter<'a, E: 'a, C: 'a>(Option<HIter<'a, E, C>>);
 
-impl<'a, EntityId: 'a, C: 'a> Iterator for Iter<'a, EntityId, C> {
-    type Item = (&'a EntityId, &'a C);
-    fn next(&mut self) -> Option<(&'a EntityId, &'a C)> { self.0.as_mut().and_then(|s| s.next()) }
+impl<'a, E: 'a, C: 'a> Iterator for Iter<'a, E, C> {
+    type Item = (&'a E, &'a C);
+    fn next(&mut self) -> Option<(&'a E, &'a C)> { self.0.as_mut().and_then(|s| s.next()) }
 }
 
-pub struct IterMut<'a, EntityId: 'a, C: 'a>(Option<HIterMut<'a, EntityId, C>>);
+pub struct IterMut<'a, E: 'a, C: 'a>(Option<HIterMut<'a, E, C>>);
 
-impl<'a, EntityId: 'a, C: 'a> Iterator for IterMut<'a, EntityId, C> {
-    type Item = (&'a EntityId, &'a mut C);
-    fn next(&mut self) -> Option<(&'a EntityId, &'a mut C)> { self.0.as_mut().and_then(|s| s.next()) }
+impl<'a, E: 'a, C: 'a> Iterator for IterMut<'a, E, C> {
+    type Item = (&'a E, &'a mut C);
+    fn next(&mut self) -> Option<(&'a E, &'a mut C)> { self.0.as_mut().and_then(|s| s.next()) }
 }
 
 #[derive(Default)]
 /// Entity-Component map, implemented as a double HashMap,
-/// first over component TypeId, then over EntityId.
-pub struct ECMap<EntityId: Hash + Eq = u32> {
+/// first over component TypeId, then over E.
+pub struct ECMap<E: Hash + Eq = u32> {
     // Index to easier iterate over all entities
-    entities: HashSet<EntityId>,
-    // The hashmap's value is a CList<C, EntityId> where C has the same TypeId.
-    components: HashMap<TypeId, Box<CompList<EntityId>>>,
-    last_entity: EntityId,
+    entities: HashSet<E>,
+    // The hashmap's value is a CList<C, E> where C has the same TypeId.
+    components: HashMap<TypeId, Box<CompList<E>>>,
+    last_entity: E,
 }
 
-impl<EntityId: Hash + Copy + Eq + Any> ECMap<EntityId> {
+impl<E: Hash + Copy + Eq + Any + Default> ECMap<E> {
 
-    fn clist<C: Any>(&self) -> Option<&CList<C, EntityId>> {
+    /// Returns a new ECMap with any Entity ID. If you want to use
+    /// ECMap::insert_entity (to generate unique entity IDs),
+    /// use ECMap::new_u32, ECMap::new_usize or ECMap::new_u64 instead.
+    pub fn new() -> ECMap<E> { Default::default() }
+
+    fn clist<C: Any>(&self) -> Option<&CList<C, E>> {
         self.components.get(&TypeId::of::<C>()).map(|c|
-            c.as_any().downcast_ref::<CList<C, EntityId>>().unwrap())
+            c.as_any().downcast_ref::<CList<C, E>>().unwrap())
     }
 
-    fn clist_mut<C: Any>(&mut self) -> Option<&mut CList<C, EntityId>> {
+    fn clist_mut<C: Any>(&mut self) -> Option<&mut CList<C, E>> {
         self.components.get_mut(&TypeId::of::<C>()).map(|c|
-            c.as_any_mut().downcast_mut::<CList<C, EntityId>>().unwrap())
+            c.as_any_mut().downcast_mut::<CList<C, E>>().unwrap())
     }
 
     /// Inserts or replaces an entity component. The old component, if there
     /// was one, is returned.
     /// If the entity or component did not at all exist, it is also added.
-    pub fn insert<C: Any>(&mut self, e: EntityId, c: C) -> Option<C> {
+    pub fn insert<C: Any>(&mut self, e: E, c: C) -> Option<C> {
         self.entities.insert(e);
         let q = self.components.entry(TypeId::of::<C>())
-            .or_insert_with(|| Box::new(CList::<C, EntityId>::new_nodbg()));
-        q.as_any_mut().downcast_mut::<CList<C, EntityId>>().unwrap().0.insert(e, c)
+            .or_insert_with(|| Box::new(CList::<C, E>::new_nodbg()));
+        q.as_any_mut().downcast_mut::<CList<C, E>>().unwrap().0.insert(e, c)
     }
 
     /// Inserts a component type and enables debugging for that component.
     /// In case the component type already exists, nothing is changed and false is returned.  
     pub fn insert_component<C: Any + Debug>(&mut self) -> bool {
         if self.contains_component::<C>() { return false }
-        self.components.insert(TypeId::of::<C>(), Box::new(CList::<C, EntityId>::new_dbg()));
+        self.components.insert(TypeId::of::<C>(), Box::new(CList::<C, E>::new_dbg()));
         true
     }
 
     /// Returns a reference to an entity component, or None if it does not exist.
-    pub fn get<C: Any>(&self, e: EntityId) -> Option<&C> {
+    pub fn get<C: Any>(&self, e: E) -> Option<&C> {
         self.clist::<C>().and_then(|s| s.0.get(&e))
     }
 
     /// Returns a mutable reference to an entity component, or None if it does not exist.
-    pub fn get_mut<C: Any>(&mut self, e: EntityId) -> Option<&mut C> {
+    pub fn get_mut<C: Any>(&mut self, e: E) -> Option<&mut C> {
         self.clist_mut::<C>().and_then(|s| s.0.get_mut(&e))
     }
 
     /// Check whether an entity component exists.
-    pub fn contains<C: Any>(&self, e: EntityId) -> bool {
+    pub fn contains<C: Any>(&self, e: E) -> bool {
         self.get::<C>(e).is_some()
     }
 
     /// Check whether an entity exists.
-    pub fn contains_entity(&self, e: EntityId) -> bool {
+    pub fn contains_entity(&self, e: E) -> bool {
         self.entities.contains(&e)
     }
 
@@ -124,13 +129,13 @@ impl<EntityId: Hash + Copy + Eq + Any> ECMap<EntityId> {
     }
 
     /// Removes an entity component.
-    pub fn remove<C: Any>(&mut self, e: EntityId) -> bool {
+    pub fn remove<C: Any>(&mut self, e: E) -> bool {
         self.components.get_mut(&TypeId::of::<C>()).map(
             |s| s.remove(&e)).unwrap_or(false)
     }
 
     /// Remove an entity (existing components will no longer have that entity).
-    pub fn remove_entity(&mut self, e: EntityId) -> bool {
+    pub fn remove_entity(&mut self, e: E) -> bool {
         if !self.entities.remove(&e) { return false };
         for (_, c) in self.components.iter_mut() { c.remove(&e); }
         true
@@ -142,24 +147,24 @@ impl<EntityId: Hash + Copy + Eq + Any> ECMap<EntityId> {
     }
 
     /// Clones the component for all entities and returns a Vec of those.
-    pub fn clone_with<C: Any + Clone>(&self) -> Vec<(EntityId, C)> {
+    pub fn clone_with<C: Any + Clone>(&self) -> Vec<(E, C)> {
         self.iter_with::<C>().map(|(k, v)| (*k, v.clone())).collect() 
     }
 
     /// Iterates over all entities having a certain component.
-    pub fn iter_with<C: Any>(&self) -> Iter<EntityId, C> {
+    pub fn iter_with<C: Any>(&self) -> Iter<E, C> {
         let c = if let Some(s) = self.clist::<C>() { s } else { return Iter(None) };
         Iter(Some(c.0.iter()))
     }
 
     /// Iterates over all entities having a certain component, yielding mutable references.
-    pub fn iter_mut_with<C: Any>(&mut self) -> IterMut<EntityId, C> {
+    pub fn iter_mut_with<C: Any>(&mut self) -> IterMut<E, C> {
         let c = if let Some(s) = self.clist_mut::<C>() { s } else { return IterMut(None) };
         IterMut(Some(c.0.iter_mut()))
     }
 }
 
-impl<EntityId: Hash + Eq + Debug> Debug for ECMap<EntityId> {
+impl<E: Hash + Eq + Debug> Debug for ECMap<E> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         // We cannot use debug_map / debug_set here, unfortunately.
         try!(f.write_str("ECMap {"));
@@ -183,10 +188,10 @@ impl<EntityId: Hash + Eq + Debug> Debug for ECMap<EntityId> {
 }
 
 impl ECMap<u32> {
-    /// Returns a new ECMap with u32 as EntityId.
-    pub fn new() -> ECMap<u32> { Default::default() }
+    /// Returns a new ECMap with u32 as Entity ID.
+    pub fn new_u32() -> ECMap<u32> { Default::default() }
 
-    /// Generates an EntityId and inserts it.
+    /// Generates an Entity ID and inserts it.
     pub fn insert_entity(&mut self) -> u32 {
         self.last_entity += 1;
         self.entities.insert(self.last_entity);
@@ -195,10 +200,10 @@ impl ECMap<u32> {
 }
 
 impl ECMap<usize> {
-    /// Returns a new ECMap with usize as EntityId.
+    /// Returns a new ECMap with usize as Entity ID.
     pub fn new_usize() -> ECMap<usize> { Default::default() }
 
-    /// Generates an EntityId and inserts it.
+    /// Generates an Entity ID and inserts it.
     pub fn insert_entity(&mut self) -> usize {
         self.last_entity += 1;
         self.entities.insert(self.last_entity);
@@ -207,10 +212,10 @@ impl ECMap<usize> {
 }
 
 impl ECMap<u64> {
-    /// Returns a new ECMap with u64 as EntityId.
+    /// Returns a new ECMap with u64 as Entity ID.
     pub fn new_u64() -> ECMap<u64> { Default::default() }
 
-    /// Generates an EntityId and inserts it.
+    /// Generates an Entity ID and inserts it.
     pub fn insert_entity(&mut self) -> u64 {
         self.last_entity += 1;
         self.entities.insert(self.last_entity);
@@ -221,7 +226,7 @@ impl ECMap<u64> {
 #[test]
 fn do_test() {
 
-    let mut e = ECMap::new();
+    let mut e = ECMap::new_usize();
     let id = e.insert_entity();
     assert_eq!(e.insert(id, 6u16), None);
     assert_eq!(e.insert(id, 10u32), None);
@@ -240,7 +245,7 @@ fn do_test() {
 #[test]
 fn debug_test() {
 
-    let mut e = ECMap::new();
+    let mut e = ECMap::new_u32();
 
     #[derive(Debug)]
     struct Name(&'static str);
