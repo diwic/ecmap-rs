@@ -1,10 +1,44 @@
 //! Entity component system.
 //!
 //! Using TypeIDs, no macros.
-//! Heavily influenced by https://github.com/andybarron/rustic-ecs
+//! Influenced by [rustic-ecs](https://github.com/andybarron/rustic-ecs)
 //! but should be more memory efficient (we use one box per component only)
 //!
 //! License: Apache2.0/MIT
+//!
+//! # Example
+//! ```
+//! // A simple component.
+//! #[derive(Debug, Clone)]
+//! struct Sound(String);
+//!
+//! let mut map = ecmap::ECMap::new();
+//! // Enable debugging for the Sound component.
+//! map.insert_component::<Sound>();
+//!
+//! // Generate an entity ID.
+//! let cat = map.insert_entity();
+//! // Insert an entity component.
+//! map.insert(cat, Sound("Meow".into()));
+//!
+//! // Prints "ECMap {1: (Sound("Meow"))}"
+//! println!("{:?}", map);
+//! // Modify component
+//! map.get_mut::<Sound>(cat).unwrap().0 = "Voof".into();
+//!
+//! // Add another entity
+//! let computer = map.insert_entity();
+//! map.insert(computer, Sound("Hello world".into()));
+//!
+//! // Access all entities that has a certain component.
+//! for (id, sound) in map.iter_with::<Sound>() {
+//!    println!("{} says {}!", id, sound.0);
+//! }
+//!
+//! // After this call, only the 'computer' entity remains. 
+//! map.remove_entity(cat);
+//! ```
+
 
 use std::collections::{HashSet, HashMap};
 use std::collections::hash_map::{Iter as HIter, IterMut as HIterMut}; 
@@ -43,6 +77,7 @@ impl<C: Any + Debug, E: Hash + Eq> CList<C, E> {
         |c: &C, f: &mut fmt::Formatter| (c as &Debug).fmt(f)))) }
 }
 
+/// Iterator struct returned by ECMap::iter_with().
 pub struct Iter<'a, E: 'a, C: 'a>(Option<HIter<'a, E, C>>);
 
 impl<'a, E: 'a, C: 'a> Iterator for Iter<'a, E, C> {
@@ -50,6 +85,7 @@ impl<'a, E: 'a, C: 'a> Iterator for Iter<'a, E, C> {
     fn next(&mut self) -> Option<(&'a E, &'a C)> { self.0.as_mut().and_then(|s| s.next()) }
 }
 
+/// Iterator struct returned by ECMap::iter_mut_with().
 pub struct IterMut<'a, E: 'a, C: 'a>(Option<HIterMut<'a, E, C>>);
 
 impl<'a, E: 'a, C: 'a> Iterator for IterMut<'a, E, C> {
@@ -58,8 +94,10 @@ impl<'a, E: 'a, C: 'a> Iterator for IterMut<'a, E, C> {
 }
 
 #[derive(Default)]
-/// Entity-Component map, implemented as a double HashMap,
-/// first over component TypeId, then over E.
+/// Entity-Component map, implemented as a double HashMap
+/// (first over component, then over entity).
+///
+/// See module level documentation for an example.
 pub struct ECMap<E: Hash + Eq = u32> {
     // Index to easier iterate over all entities
     entities: HashSet<E>,
@@ -192,6 +230,8 @@ impl<E: Hash + Eq + Debug> Debug for ECMap<E> {
 impl ECMap<u32> {
     /// Returns a new ECMap with u32 as Entity ID.
     pub fn new() -> ECMap<u32> { Default::default() }
+    /// Returns a new ECMap with u32 as Entity ID.
+    pub fn new_u32() -> ECMap<u32> { Default::default() }
 
     /// Generates an Entity ID and inserts it.
     pub fn insert_entity(&mut self) -> u32 {
@@ -283,4 +323,34 @@ fn str_as_id() {
 
     e.insert("Cat", Sound("Meow"));
     assert_eq!(e.get::<Sound>("Cat"), Some(&Sound("Meow")));
+}
+
+#[test]
+fn same_as_doc() {
+    // A simple component.
+    #[derive(Debug, Clone)]
+    struct Sound(String);
+
+    let mut map = ECMap::new();
+    // Enable debugging for the Sound component.
+    map.insert_component::<Sound>();
+    // Generate an entity ID.
+    let cat = map.insert_entity();
+    // Insert an entity component.
+    map.insert(cat, Sound("Meow".into()));
+    // Prints "ECMap {1: (Sound("Meow"))}"
+    println!("{:?}", map);
+    // Prints Sound("Meow")
+    println!("{:?}", map.get::<Sound>(cat));
+    // Modify component
+    map.get_mut::<Sound>(cat).unwrap().0 = "Voof!".into();
+    // Add another entity
+    let computer = map.insert_entity();
+    map.insert(computer, Sound("Hello world".into()));
+    // Access all entities that has a certain component.
+    for (id, sound) in map.iter_with::<Sound>() {
+       println!("{} says {}!", id, sound.0);
+    }
+    // After this call, only the 'computer' entity remains. 
+    map.remove_entity(cat);
 }

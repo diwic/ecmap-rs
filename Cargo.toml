@@ -1,0 +1,7 @@
+[package]
+name = "ecmap"
+version = "0.1.0"
+authors = ["David Henningsson <diwic@ubuntu.com>"]
+licence = "Apache2.0/MIT"
+
+[dependencies]
